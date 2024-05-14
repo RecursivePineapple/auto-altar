@@ -73,14 +73,14 @@ while true do
     elseif option == 13 then
         local options = { "Cancel" }
 
-        for i, orb in ipairs(orbs) do
+        for i, orb in ipairs(orbs.orbs) do
             options[#options + 1] = orb.label
         end
 
         local opt = config_utils.get_option(options)
 
         if opt ~= 1 then
-            config.blood_orb = orbs[opt - 1].name
+            config.blood_orb = orbs.orbs[opt - 1].name
         end
     elseif option == 14 then
         if filesystem.exists("/etc/blood-altar.cfg") then
