@@ -3,7 +3,7 @@ local component = require("component")
 local sides = require("sides")
 local io = require("io")
 
-local utils = require("utils")
+local utils = require("blood_altar.utils")
 
 local config_utils = {}
 
@@ -17,7 +17,7 @@ function config_utils.get_option(options)
 
         io.write("Enter selection: ")
 
-        local n = io.read("*n")
+        local n = tonumber(io.read("*l"))
 
         if n ~= nil and options[keys[n]] ~= nil then
             print()

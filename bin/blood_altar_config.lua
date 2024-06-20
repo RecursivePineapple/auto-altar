@@ -4,10 +4,10 @@ local serialization = require("serialization")
 local filesystem = require("filesystem")
 local sides = require("sides")
 
-local utils = require("utils")
-local orbs = require("orbs")
+local utils = require("blood_altar.utils")
+local orbs = require("blood_altar.orbs")
 
-local config_utils = require("config_utils")
+local config_utils = require("blood_altar.config_utils")
 
 local config = utils.load("/etc/blood-altar.cfg") or {}
 
@@ -15,6 +15,9 @@ if config.on_high == nil then
     config.on_high = true
 end
 
+if config.refill_period == nil then
+    config.refill_period = 0
+end
 
 print("blood altar configuration tool")
 
@@ -32,9 +35,9 @@ while true do
         "Set altar side",
         "Set redstone i/o",
         "Set altar redstone WA enable side",
-        "Set altar redstone comparator side",
         "Set enable signal to " .. (config.on_high and "'Disable with Redstone'" or "'Enable with Redstone'"),
         "Select orb",
+        "Set minimum time between soul network refills",
         "Save and exit"
     })
 
@@ -63,14 +66,8 @@ while true do
             config.redstone_side = side
         end
     elseif option == 11 then
-        local side = config_utils.get_side()
-
-        if side ~= nil then
-            config.redstone_input_side = side
-        end
-    elseif option == 12 then
         config.on_high = not config.on_high
-    elseif option == 13 then
+    elseif option == 12 then
         local options = { "Cancel" }
 
         for i, orb in ipairs(orbs.orbs) do
@@ -81,6 +78,20 @@ while true do
 
         if opt ~= 1 then
             config.blood_orb = orbs.orbs[opt - 1].name
+        end
+    elseif option == 13 then
+        while true do
+            io.write("Enter the number of seconds between soul network refills (while active): ")
+    
+            local n = io.read("*n")
+    
+            if n ~= nil and n >= 0 then
+                print()
+                config.refill_period = n
+                break
+            end
+    
+            print("Invalid option, expected a number greater than or equal to zero")
         end
     elseif option == 14 then
         if filesystem.exists("/etc/blood-altar.cfg") then

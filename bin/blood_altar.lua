@@ -2,15 +2,21 @@
 local os = require("os")
 local component = require("component")
 
-local utils = require("utils")
-local orbs = require("orbs")
+local utils = require("blood_altar.utils")
+local orbs = require("blood_altar.orbs")
+local logging = require("blood_altar.logging")
 
 local config = utils.load("/etc/blood-altar.cfg")
 
 if config == nil then
-    print("could not load config")
-    return
+    error("could not load config")
 end
+
+local logger = logging({
+    app_name = "blood_altar",
+    debug = config.debug_logs,
+    max_level = config.max_log_level,
+})
 
 local wait_timeout = 5 * 60
 local idle_timeout = 5
@@ -29,14 +35,14 @@ function set_active(active)
     is_active = active
 
     if active then
-        print("starting altar")
+        logger.info("starting altar")
         if config.on_high then
             redstone.setOutput(config.redstone_side, 15)
         else
             redstone.setOutput(config.redstone_side, 0)
         end
     else
-        print("stopping altar")
+        logger.info("stopping altar")
         if config.on_high then
             redstone.setOutput(config.redstone_side, 0)
         else
@@ -50,15 +56,17 @@ function get_active_item()
 end
 
 function clear_altar(message)
-    print("clearing altar: " .. message)
+    logger.info("clearing altar: " .. message)
     transposer.transferItem(config.altar_side, config.staging_side, 64)
     set_active(false)
 end
 
 function fill_altar(input_side, input_slot)
+    -- sleep so that the altar doesn't eat the item
+    os.sleep(2)
     transposer.transferItem(input_side, config.altar_side, 64, input_slot)
     last_inserted_item = get_active_item()
-    print("putting item into altar: " .. last_inserted_item.label)
+    logger.info("putting item into altar: " .. last_inserted_item.label)
 end
 
 function wait_until_finished(start_item)
@@ -75,8 +83,6 @@ function wait_until_finished(start_item)
 
     set_active(true)
 
-    local last_blood = nil
-    
     local waiting_for_orb = orbs.is_item_an_orb(start_item)
 
     while true do
@@ -87,27 +93,29 @@ function wait_until_finished(start_item)
             return false
         end
 
-        if waiting_for_orb then
-            local amount_filled = redstone.getInput(config.redstone_input_side)
+        local current_blood = altar.getCurrentBlood()
 
-            if amount_filled == 15 then
-                clear_altar("soul network is full")
-
-                return true
+        if current_blood >= altar.getCapacity() * 0.9 or current_blood == 0 then
+            if idle_since == nil then
+                idle_since = now
             end
         else
-            local current_blood = altar.getCurrentBlood()
+            idle_since = nil
+        end
 
-            if current_blood == last_blood then
-                if idle_since == nil then
-                    idle_since = now
+        if waiting_for_orb then
+            if idle_since ~= nil and (now - idle_since) > 5 then 
+                if current_blood > 0 then
+                    clear_altar("soul network is full")
+                    return true
+                else
+                    clear_altar("altar ran out of LP")
+                    return false
                 end
-            else
-                idle_since = nil
             end
-
+        else
             if idle_since ~= nil and (now - idle_since) > idle_timeout then
-                if last_blood == altar.getCapacity() then
+                if current_blood > 0 then
                     clear_altar("altar is idle")
                     return true
                 else
@@ -115,8 +123,6 @@ function wait_until_finished(start_item)
                     return false
                 end
             end
-
-            last_blood = current_blood
         end
 
         local current_item = get_active_item()
@@ -140,29 +146,37 @@ function is_item_the_orb(item)
 end
 
 last_inserted_item = get_active_item()
+last_refill = 0
+skip_next_wait = false
+
+::enter_active::
+logger.info("entering active state")
 
 ::active::
 
-if last_inserted_item ~= nil then
-    if not wait_until_finished(last_inserted_item) then
-        if interrupted then
-            return
-        end
+if is_item_the_orb(last_inserted_item) then
+    last_refill = os.time() / 72
+end
 
-        print("could not wait for altar to finish: program will exit")
+if not skip_next_wait and last_inserted_item ~= nil then
+    if not wait_until_finished(last_inserted_item) then
+        logger.error("could not wait for altar to finish: program will exit")
         set_active(false)
         return
     end
 end
 
+skip_next_wait = false
+
 local found_orb = false
 
 for i, item in pairs(transposer.getAllStacks(config.staging_side).getAll()) do
     if not found_orb and is_item_the_orb(item) then
+        -- only keep one orb
         found_orb = true
     elseif item.name ~= nil then
-        print("moving item from staging to output: " .. item.label)
         transposer.transferItem(config.staging_side, config.output_side, 64, i + 1)
+        logger.info("moving item from staging to output: " .. item.label)
     end
 end
 
@@ -182,37 +196,46 @@ else
 
     for i, item in pairs(transposer.getAllStacks(config.staging_side).getAll()) do
         if not found_orb and is_item_the_orb(item) then
-            fill_altar(config.staging_side, i + 1)
             found_orb = true
+            if config.refill_period == nil or (os.time() / 72 - last_refill) > config.refill_period then
+                fill_altar(config.staging_side, i + 1)
+            else
+                last_inserted_item = item
+                skip_next_wait = true
+            end
         elseif item.name ~= nil then
             transposer.transferItem(config.staging_side, config.output_side, 64, i + 1)
-            print("moving item from staging to output: " .. item.label)
+            logger.info("moving item from staging to output: " .. item.label)
         end
     end
 
     if not found_orb then
         set_active(false)
-        print("could not find an orb: put one in the staging chest")
-        return
+        logger.warn("could not find an orb: put one in the staging chest; script will sleep 30s")
+        os.sleep(30)
+        goto active
     end
 end
 
 if last_inserted_item == nil then
-    print("no items in input chest: idling")
-    goto idle
+    logger.info("no items in input chest: idling")
+    goto enter_idle
 end
 
 os.sleep(0)
 
 goto active
 
-::idle::
-os.sleep(0)
+::enter_idle::
+logger.info("entering idle state")
 
+local last_blood = altar.getCurrentBlood()
+
+::idle::
 for i, item in pairs(transposer.getAllStacks(config.input_side).getAll()) do
     if item.label ~= nil then
-        print("found a pending input item: activating")
-        goto active
+        logger.info("found a pending input item: activating")
+        goto enter_active
     end
 end
 
@@ -220,8 +243,8 @@ local active_item = get_active_item()
 
 if active_item ~= nil and active_item.label ~= nil and not is_item_the_orb(active_item) then
     last_inserted_item = active_item
-    print("found an item in the altar: activating")
-    goto active
+    logger.info("found an item in the altar: activating")
+    goto enter_active
 end
 
 if active_item == nil or active_item.label == nil then
@@ -237,23 +260,22 @@ if active_item == nil or active_item.label == nil then
 
     if not found_orb then
         set_active(false)
-        print("could not find an orb: put one in the staging chest")
+        logger.warn("could not find an orb: put one in the staging chest; script will sleep 30s")
+        os.sleep(30)
+        goto idle
+    end
+end
+
+local current_blood = altar.getCurrentBlood()
+
+if current_blood < last_blood then
+    if not wait_until_finished() then
+        logger.error("could not wait for soul network to fill: program will exit")
+        set_active(false)
         return
     end
+    last_blood = altar.getCurrentBlood()
 end
 
-local amount_filled = redstone.getInput(config.redstone_input_side)
-
-if amount_filled == 15 then
-    if is_active then
-        print("soul network is full")
-        set_active(false)
-    end
-else
-    if not is_active and is_item_the_orb(get_active_item()) then
-        print("soul network isn't full")
-        set_active(true)
-    end
-end
-
+os.sleep(1)
 goto idle
