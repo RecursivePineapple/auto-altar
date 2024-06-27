@@ -66,7 +66,7 @@ function fill_altar(input_side, input_slot)
     os.sleep(2)
     transposer.transferItem(input_side, config.altar_side, 64, input_slot)
     last_inserted_item = get_active_item()
-    logger.info("putting item into altar: " .. last_inserted_item.label)
+    logger.info("putting item into altar: " .. (last_inserted_item and last_inserted_item.label or "nil"))
 end
 
 function wait_until_finished(start_item)
