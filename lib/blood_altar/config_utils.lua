@@ -89,14 +89,12 @@ function config_utils.get_side()
 end
 
 function config_utils.get_transposer_side(address)
-    local tpose = component.proxy(address)
-
-    local opt
-
-    ::reload::
+    local tpose = component.proxy(address or "")
 
     if tpose ~= nil then
-        opt = config_utils.get_option({
+        ::reload::
+
+        local opt = config_utils.get_option({
             "Cancel",
             "Reload inventory names",
             [sides.top + 3] = "Top (inventory name = " .. (tpose.getInventoryName(sides.top) or "nil") .. ")",
@@ -106,24 +104,30 @@ function config_utils.get_transposer_side(address)
             [sides.east + 3] = "East (inventory name = " .. (tpose.getInventoryName(sides.east) or "nil") .. ")",
             [sides.west + 3] = "West (inventory name = " .. (tpose.getInventoryName(sides.west) or "nil") .. ")",
         })
-    else
-        opt = config_utils.get_option({
-            "Cancel",
-            [sides.top + 3] = "Top",
-            [sides.bottom + 3] = "Bottom",
-            [sides.north + 3] = "North",
-            [sides.south + 3] = "South",
-            [sides.east + 3] = "East",
-            [sides.west + 3] = "West",
-        })
-    end
 
-    if opt == 1 then
-        return nil
-    elseif opt == 2 then
-        goto reload
+        if opt == 1 then
+            return nil
+        elseif opt == 2 then
+            goto reload
+        else
+            return opt - 3
+        end
     else
-        return opt - 3
+        local opt = config_utils.get_option({
+            "Cancel",
+            [sides.top + 2] = "Top",
+            [sides.bottom + 2] = "Bottom",
+            [sides.north + 2] = "North",
+            [sides.south + 2] = "South",
+            [sides.east + 2] = "East",
+            [sides.west + 2] = "West",
+        })
+
+        if opt == 1 then
+            return nil
+        else
+            return opt - 1
+        end
     end
 end
 

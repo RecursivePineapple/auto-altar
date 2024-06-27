@@ -5,55 +5,12 @@ local serialization = require("serialization")
 
 local utils = {}
 
-function utils.table_to_string(tbl)
-    if type(tbl) ~= "table" then
-        return tostring(tbl)
-    end
-
-    local result = "{"
-    if tbl[1] ~= nil then
-        local start = 1
-        
-        if tbl[0] ~= nil then
-            start = 0
-        end
-
-        for i = 1, #tbl do
-            local v = tbl[i]
-            if type(v) == "table" then
-                v = utils.table_to_string(v)
-            end
-
-            if i > 1 then
-                result = result .. ", " .. "[" .. i .. "]=" .. tostring(v)
-            else
-                result = result .. "[" .. i .. "]=" .. tostring(v)
-            end
-        end
-    else
-        local first = true
-        for k, v in pairs(tbl) do
-            if type(v) == "table" then
-                v = utils.table_to_string(v)
-            end
-
-            if not first then
-                result = result .. ", " .. k .. "=" .. tostring(v)
-            else
-                result = result .. k .. "=" .. tostring(v)
-                first = false
-            end
-        end
-    end
-    return result .. "}"
-end
-
 function utils.table_to_string_pretty(tbl, indent)
     if type(tbl) ~= "table" then
-        return tostring(tbl)
+        return serialization.serialize(tbl)
     end
 
-    if #tbl == 0 then
+    if next(tbl) == nil then
         return "{}"
     end
 
@@ -133,10 +90,6 @@ utils.side_names = {
     [sides.north] = "north",
     [sides.south] = "south",
 }
-
-function utils.get_side_name(side)
-    return utils.side_names[side]
-end
 
 function utils.load(file)
     local file = io.open(file, "r")

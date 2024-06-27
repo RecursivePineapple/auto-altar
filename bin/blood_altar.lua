@@ -1,6 +1,7 @@
 
 local os = require("os")
 local component = require("component")
+local event = require("event")
 
 local utils = require("blood_altar.utils")
 local orbs = require("blood_altar.orbs")
@@ -9,7 +10,63 @@ local logging = require("blood_altar.logging")
 local config = utils.load("/etc/blood-altar.cfg")
 
 if config == nil then
-    error("could not load config")
+    print("error: could not load config")
+    return
+end
+
+local function check_address(addr, name)
+    if addr == nil then
+        print("error: " .. name .. " address was not set")
+        return false
+    end
+
+    if component.proxy(addr) == nil then
+        print("error: " .. name .. " address is set, but the altar was not connected to the computer: try re-entering it")
+        return false
+    end
+
+    return true
+end
+
+local tpose_sides = {}
+
+local function check_tpose_side(transposer, side, name)
+    if side == nil then
+        print("error: '" .. name .. "' side was not set")
+        return false
+    end
+
+    if transposer.getInventoryName(side) == nil then
+        print("error: '" .. name .. "' side was set, but no inventory is present at that side")
+        return false
+    end
+
+    if tpose_sides[side] then
+        print("error: '" .. name .. "' side conflicts with '" .. tpose_sides[side]:lower() .. "' side: two inventories cannot share the same transposer side")
+        return false
+    end
+
+    tpose_sides[side] = name
+
+    return true
+end
+
+if not check_address(config.altar, "altar") then return end
+if not check_address(config.transposer, "transposer") then return end
+if not check_address(config.redstone, "redstone") then return end
+
+local altar = component.proxy(config.altar)
+local transposer = component.proxy(config.transposer)
+local redstone = component.proxy(config.redstone)
+
+if not check_tpose_side(transposer, config.input_side, "input") then return end
+if not check_tpose_side(transposer, config.altar_side, "altar") then return end
+if not check_tpose_side(transposer, config.staging_side, "staging") then return end
+if not check_tpose_side(transposer, config.output_side, "output") then return end
+
+if config.redstone_side == nil then
+    print("error: redstone side was not set")
+    return
 end
 
 local logger = logging({
@@ -18,12 +75,7 @@ local logger = logging({
     max_level = config.max_log_level,
 })
 
-local wait_timeout = 5 * 60
-local idle_timeout = 5
-
-local altar = component.proxy(config.altar)
-local transposer = component.proxy(config.transposer)
-local redstone = component.proxy(config.redstone)
+local idle_timeout = 10
 
 local is_active = nil
 local last_inserted_item = nil
@@ -63,7 +115,13 @@ end
 
 function fill_altar(input_side, input_slot)
     -- sleep so that the altar doesn't eat the item
-    os.sleep(2)
+    while altar.getProgress() > 0 do
+        if event.pull(0, "interrupted") ~= nil then
+            logger.info("interrupted")
+            set_active(false)
+            os.exit()
+        end
+    end
     transposer.transferItem(input_side, config.altar_side, 64, input_slot)
     last_inserted_item = get_active_item()
     logger.info("putting item into altar: " .. (last_inserted_item and last_inserted_item.label or "nil"))
@@ -78,6 +136,7 @@ function wait_until_finished(start_item)
     end
 
     local idle_since = nil
+    local last_progress = altar.getProgress()
 
     local start = os.time() / 72
 
@@ -85,26 +144,27 @@ function wait_until_finished(start_item)
 
     local waiting_for_orb = orbs.is_item_an_orb(start_item)
 
+    if waiting_for_orb then
+        logger.info("waiting for soul network to fill")
+    else
+        logger.info("waiting for " .. start_item.label .. " to finish")
+    end
+
     while true do
         local now = os.time() / 72
 
-        if (now - start) > wait_timeout then
-            clear_altar("timed out while waiting for altar to finish")
-            return false
-        end
-
-        local current_blood = altar.getCurrentBlood()
-
-        if current_blood >= altar.getCapacity() * 0.9 or current_blood == 0 then
-            if idle_since == nil then
-                idle_since = now
-            end
-        else
-            idle_since = nil
-        end
-
         if waiting_for_orb then
-            if idle_since ~= nil and (now - idle_since) > 5 then 
+            local current_blood = altar.getCurrentBlood()
+    
+            if current_blood >= altar.getCapacity() * 0.9 or current_blood == 0 then
+                if idle_since == nil then
+                    idle_since = now
+                end
+            else
+                idle_since = nil
+            end
+    
+            if idle_since ~= nil and (now - idle_since) > idle_timeout then 
                 if current_blood > 0 then
                     clear_altar("soul network is full")
                     return true
@@ -129,7 +189,7 @@ function wait_until_finished(start_item)
 
         if current_item == nil or current_item.name == nil then
             clear_altar("item is missing")
-            return false
+            return true
         end
 
         if current_item.name ~= start_item.name then
@@ -137,7 +197,10 @@ function wait_until_finished(start_item)
             return true
         end
 
-        os.sleep(0)
+        if event.pull(0, "interrupted") ~= nil then
+            logger.info("interrupted")
+            return false
+        end
     end
 end
 
@@ -148,6 +211,11 @@ end
 last_inserted_item = get_active_item()
 last_refill = 0
 skip_next_wait = false
+
+if is_item_the_orb(last_inserted_item) then
+    logger.info("the orb was already in the altar: moving to the idle state")
+    goto enter_idle
+end
 
 ::enter_active::
 logger.info("entering active state")
@@ -168,7 +236,7 @@ end
 
 skip_next_wait = false
 
-local found_orb = false
+found_orb = false
 
 for i, item in pairs(transposer.getAllStacks(config.staging_side).getAll()) do
     if not found_orb and is_item_the_orb(item) then
@@ -200,6 +268,7 @@ else
             if config.refill_period == nil or (os.time() / 72 - last_refill) > config.refill_period then
                 fill_altar(config.staging_side, i + 1)
             else
+                -- we want to add a non-orb item to the altar, but we don't want to wait for an empty altar
                 last_inserted_item = item
                 skip_next_wait = true
             end
@@ -212,7 +281,12 @@ else
     if not found_orb then
         set_active(false)
         logger.warn("could not find an orb: put one in the staging chest; script will sleep 30s")
-        os.sleep(30)
+        if event.pull(30, "interrupted") ~= nil then
+            logger.info("interrupted")
+            set_active(false)
+            return
+        end
+        
         goto active
     end
 end
@@ -222,7 +296,11 @@ if last_inserted_item == nil then
     goto enter_idle
 end
 
-os.sleep(0)
+if event.pull(0, "interrupted") ~= nil then
+    logger.info("interrupted")
+    set_active(false)
+    return
+end
 
 goto active
 
@@ -234,7 +312,7 @@ local last_blood = altar.getCurrentBlood()
 ::idle::
 for i, item in pairs(transposer.getAllStacks(config.input_side).getAll()) do
     if item.label ~= nil then
-        logger.info("found a pending input item: activating")
+        logger.info("found a pending input item: " .. item.label)
         goto enter_active
     end
 end
@@ -261,7 +339,12 @@ if active_item == nil or active_item.label == nil then
     if not found_orb then
         set_active(false)
         logger.warn("could not find an orb: put one in the staging chest; script will sleep 30s")
-        os.sleep(30)
+        if event.pull(30, "interrupted") ~= nil then
+            logger.info("interrupted")
+            set_active(false)
+            return
+        end
+        
         goto idle
     end
 end
@@ -277,5 +360,10 @@ if current_blood < last_blood then
     last_blood = altar.getCurrentBlood()
 end
 
-os.sleep(1)
+if event.pull(1, "interrupted") ~= nil then
+    logger.info("interrupted")
+    set_active(false)
+    return
+end
+
 goto idle

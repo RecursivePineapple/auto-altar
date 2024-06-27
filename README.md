@@ -23,7 +23,8 @@ To run the script on boot, just add the following to your `/home/.shrc` file:
 ```
 blood_altar
 ```
-Note that the script does not listen for Ctrl+C interrupts yet, although Ctrl+Alt+C is respected.
+
+To exit cleanly, press Ctrl+C.
 
 ## Configuration
 This script comes with a REPL configuration command called `blood_altar_config` which significantly simplifies setup. Running the script and saving will generate the config file `/etc/blood-altar.cfg`. The config can be hand edited, although this is not recommended since the contents are subject to change and there is no documentation for the format. Just read the code if you really want to edit it manually.

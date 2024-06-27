@@ -27,4 +27,14 @@ function orbs.is_item_an_orb(item)
     return false
 end
 
+function orbs.get_orb_label(name)
+    for i, orb in pairs(orbs.orbs) do
+        if orb.name == name then
+            return orb.label
+        end
+    end
+
+    return nil
+end
+
 return orbs
