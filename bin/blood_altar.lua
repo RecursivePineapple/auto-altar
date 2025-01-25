@@ -2,6 +2,7 @@
 local os = require("os")
 local component = require("component")
 local event = require("event")
+local math = require("math")
 
 local utils = require("blood_altar.utils")
 local orbs = require("blood_altar.orbs")
@@ -36,17 +37,20 @@ local function check_tpose_side(transposer, side, name)
         return false
     end
 
+    local tpose = tpose_sides[transposer.address] or {}
+    tpose_sides[transposer.address] = tpose
+
     if transposer.getInventoryName(side) == nil then
         print("error: '" .. name .. "' side was set, but no inventory is present at that side")
         return false
     end
 
-    if tpose_sides[side] then
-        print("error: '" .. name .. "' side conflicts with '" .. tpose_sides[side]:lower() .. "' side: two inventories cannot share the same transposer side")
+    if tpose[side] then
+        print("error: '" .. name .. "' side conflicts with '" .. tpose[side]:lower() .. "' side: two inventories cannot share the same transposer side")
         return false
     end
 
-    tpose_sides[side] = name
+    tpose[side] = name
 
     return true
 end
@@ -54,15 +58,22 @@ end
 if not check_address(config.altar, "altar") then return end
 if not check_address(config.transposer, "transposer") then return end
 if not check_address(config.redstone, "redstone") then return end
+if not check_address(config.orb_transposer, "orb transposer") then return end
+if not config.lp_target then
+    print("error: soul network lp target not set")
+    return
+end
 
 local altar = component.proxy(config.altar)
 local transposer = component.proxy(config.transposer)
+local orb_transposer = component.proxy(config.orb_transposer)
 local redstone = component.proxy(config.redstone)
 
 if not check_tpose_side(transposer, config.input_side, "input") then return end
 if not check_tpose_side(transposer, config.altar_side, "altar") then return end
 if not check_tpose_side(transposer, config.staging_side, "staging") then return end
 if not check_tpose_side(transposer, config.output_side, "output") then return end
+if not check_tpose_side(orb_transposer, config.orb_side, "orb altar side") then return end
 
 if config.redstone_side == nil then
     print("error: redstone side was not set")
@@ -127,6 +138,22 @@ function fill_altar(input_side, input_slot)
     logger.info("putting item into altar: " .. (last_inserted_item and last_inserted_item.label or "nil"))
 end
 
+function get_stored_lp()
+    return orb_transposer.getStackInSlot(config.orb_side, 1).networkEssence
+end
+
+-- https://stackoverflow.com/a/10992898
+function format_int(number)
+    local i, j, minus, int, fraction = tostring(number):find('([-]?)(%d+)([.]?%d*)')
+
+    -- reverse the int-string and append a comma to all blocks of 3 digits
+    int = int:reverse():gsub("(%d%d%d)", "%1,")
+
+    -- reverse the int-string back remove an optional comma and put the 
+    -- optional minus and fractional part back
+    return minus .. int:reverse():gsub("^,", "") .. fraction
+end
+
 function wait_until_finished(start_item)
     local start_item = start_item or get_active_item()
 
@@ -150,28 +177,28 @@ function wait_until_finished(start_item)
         logger.info("waiting for " .. start_item.label .. " to finish")
     end
 
+    local last_lp_print = 0
+    local last_lp = get_stored_lp()
+
     while true do
         local now = os.time() / 72
 
         if waiting_for_orb then
-            local current_blood = altar.getCurrentBlood()
-    
-            if current_blood >= altar.getCapacity() * 0.9 or current_blood == 0 then
-                if idle_since == nil then
-                    idle_since = now
-                end
-            else
-                idle_since = nil
+            local lp = get_stored_lp()
+
+            if lp > config.lp_target then
+                clear_altar("network is full")
+                return true
             end
-    
-            if idle_since ~= nil and (now - idle_since) > idle_timeout then 
-                if current_blood > 0 then
-                    clear_altar("soul network is full")
-                    return true
-                else
-                    clear_altar("altar ran out of LP")
-                    return false
-                end
+
+            if now - last_lp_print > 20 then
+                logger.info(
+                    "network status: " ..
+                    format_int(lp) .. " / " .. format_int(config.lp_target) ..
+                    " (" .. (lp - last_lp > 0 and "+" or "") ..
+                    format_int(math.floor((lp - last_lp) / (now - last_lp_print))) .. " LP/s)")
+                last_lp_print = now
+                last_lp = lp
             end
         else
             if idle_since ~= nil and (now - idle_since) > idle_timeout then
@@ -307,8 +334,6 @@ goto active
 ::enter_idle::
 logger.info("entering idle state")
 
-local last_blood = altar.getCurrentBlood()
-
 ::idle::
 for i, item in pairs(transposer.getAllStacks(config.input_side).getAll()) do
     if item.label ~= nil then
@@ -349,15 +374,13 @@ if active_item == nil or active_item.label == nil then
     end
 end
 
-local current_blood = altar.getCurrentBlood()
-
-if current_blood < last_blood then
+if get_stored_lp() < config.lp_target then
+    logger.info("network lp is low: activating altar")
     if not wait_until_finished() then
         logger.error("could not wait for soul network to fill: program will exit")
         set_active(false)
         return
     end
-    last_blood = altar.getCurrentBlood()
 end
 
 if event.pull(1, "interrupted") ~= nil then

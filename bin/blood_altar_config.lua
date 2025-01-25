@@ -15,10 +15,6 @@ if config.on_high == nil then
     config.on_high = true
 end
 
-if config.refill_period == nil then
-    config.refill_period = 0
-end
-
 print("blood altar configuration tool")
 
 local function get_side_name(side, transposer)
@@ -70,7 +66,9 @@ while true do
         "Set altar redstone WA enable side",
         "Set enable signal to " .. (config.on_high and "'Disable with Redstone'" or "'Enable with Redstone'"),
         "Select orb",
-        "Set minimum time between soul network refills",
+        "Set orb altar transposer",
+        "Set orb altar transposer altar side",
+        "Set soul network LP target",
         "Save and exit"
     })
 
@@ -98,13 +96,13 @@ while true do
         print()
         print("Orb: ".. (orbs.get_orb_label(config.blood_orb) or "nil"))
         print()
-        print("Soul network refill period: " .. (config.refill_period or "nil"))
+        print("Soul network LP target: " .. (config.lp_target or "nil"))
         print()
 
     elseif option == 3 then
         config_utils.select_component("blood_altar", config, "altar")
     elseif option == 4 then
-        config_utils.select_component("transposer", config, "transposer")
+        config_utils.select_component("transposer", config, "transposer", {["transposer"] = "main transposer", ["orb_transposer"] = "orb altar transposer"})
     elseif option == 5 then
         config.input_side = config_utils.get_transposer_side(config.transposer) or config.input_side
     elseif option == 6 then
@@ -132,20 +130,16 @@ while true do
             config.blood_orb = orbs.orbs[opt - 1].name
         end
     elseif option == 13 then
-        while true do
-            io.write("Enter the number of seconds between soul network refills (while active): ")
-    
-            local n = io.read("*n")
-    
-            if n ~= nil and n >= 0 then
-                print()
-                config.refill_period = n
-                break
-            end
-    
-            print("Invalid option, expected a number greater than or equal to zero")
-        end
+        config_utils.select_component("transposer", config, "orb_transposer", {["transposer"] = "main transposer", ["orb_transposer"] = "orb altar transposer"})
     elseif option == 14 then
+        config.orb_side = config_utils.get_transposer_side(config.orb_transposer) or config.orb_side
+    elseif option == 15 then
+        io.write("Enter the amount of LP to maintain: ")
+
+        config.lp_target = tonumber(io.read("*l")) or config.lp_target
+
+        print("Set soul network LP target to: " .. (config.lp_target or "nil"))
+    elseif option == 16 then
         if filesystem.exists("/etc/blood-altar.cfg") then
             filesystem.rename("/etc/blood-altar.cfg", "/etc/blood-altar-backup.cfg")
             print("Backed up old config to /etc/blood-altar-backup.cfg")

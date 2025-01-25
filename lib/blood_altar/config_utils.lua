@@ -35,7 +35,7 @@ function config_utils.get_yes_no()
     }) == 1
 end
 
-function config_utils.select_component(component_type, config, field)
+function config_utils.select_component(component_type, config, field, use_candidates)
     ::reload::
 
     local options = {
@@ -50,10 +50,29 @@ function config_utils.select_component(component_type, config, field)
         local idx = #options + 1
         addresses[idx] = address
 
-        if address == config[field] then
-            options[idx] = address .. " (used)"
+        if use_candidates == nil then
+            if address == config[field] then
+                options[idx] = address .. " (used)"
+            else
+                options[idx] = address .. " (unused)"
+            end
         else
-            options[idx] = address .. " (unused)"
+            local use_string = ""
+
+            for key, human_name in pairs(use_candidates) do
+                if address == config[key] then
+                    if #use_string > 0 then
+                        use_string = use_string .. ", "
+                    end
+                    use_string = use_string .. human_name
+                end
+            end
+
+            if #use_string > 0 then
+                options[idx] = address .. " (used by " .. use_string .. ")"
+            else
+                options[idx] = address .. " (unused)"
+            end
         end
     end
 
